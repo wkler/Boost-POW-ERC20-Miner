@@ -6,6 +6,7 @@ This Go project is a fully-functional tool for participating in Ethereum's PoWER
 
 ## Features
 
+- **(NEW)Boost Miner**: Auto adjust task number according cpu cores number and Optimize the counter channel and rng generate method rusult in a 8x speed up.
 - **Mining Functionality**: Generates nonces and compares the resulting hash against a target, mimicking the actual mining process in Ethereum.
 - **Parallel Mining Workers**: Utilizes Go's concurrency capabilities to deploy multiple mining workers, increasing the chance of finding a valid nonce.
 - **Smart Contract Interaction**: Retrieves the current mining challenge and difficulty from a specified Ethereum smart contract.
