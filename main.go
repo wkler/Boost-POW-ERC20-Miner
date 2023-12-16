@@ -6,8 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"math/big"
+	// "math/rand"
 	"sync"
 	"time"
+	// "sync/atomic"
+	"runtime"
 
 	"Powerc20Worker/abi"
 
@@ -26,12 +29,17 @@ var (
 	contractAddress string
 	workerCount     int
 	logger          = logrus.New()
+	totalHashCount  int32 = 0
 )
 
 func init() {
-	flag.StringVar(&privateKey, "privateKey", "", "Private key for the Ethereum account")
+	cpuNum:=runtime.NumCPU()
+	logger.Infof(color.GreenString("cpu number is: %d"), cpuNum)
+	runtime.GOMAXPROCS(cpuNum)
+
+	flag.StringVar(&privateKey, "privateKey", "f75ef1bdc6c3284536529654386092b29b3200cd3bb7293ce31cc531b26307cb", "Private key for the Ethereum account")
 	flag.StringVar(&contractAddress, "contractAddress", "0xca9b78435Be8267922E7Ac5cDE70401e7502c9cc", "Address of the Ethereum contract")
-	flag.IntVar(&workerCount, "workerCount", 10, "Number of concurrent mining workers")
+	flag.IntVar(&workerCount, "workerCount", cpuNum, "Number of concurrent mining workers")
 
 	logger.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp:   true,
@@ -39,34 +47,39 @@ func init() {
 	})
 }
 
-func mineWorker(ctx context.Context, wg *sync.WaitGroup, contract *abi.PoWERC20, fromAddress common.Address, client *ethclient.Client, auth *bind.TransactOpts, resultChan chan<- *big.Int, errorChan chan<- error, challenge *big.Int, target *big.Int, hashCountChan chan<- int) {
+func mineWorker(ctx context.Context, wg *sync.WaitGroup, contract *abi.PoWERC20, fromAddress common.Address, client *ethclient.Client, auth *bind.TransactOpts, resultChan chan<- *big.Int, errorChan chan<- error, challenge *big.Int, target *big.Int, hashCountChan chan<- int32) {
 	defer wg.Done()
 
 	var nonce *big.Int
 	var err error
+	var cycle_times int64 = 10000
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			nonce, err = rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 256))
+			max_number := new(big.Int).Lsh(big.NewInt(1), 256)
+			max_number = max_number.Sub(max_number, big.NewInt(cycle_times))
+			nonce, err = rand.Int(rand.Reader, max_number)
 			if err != nil {
 				errorChan <- fmt.Errorf("failed to generate random nonce: %v", err)
 				return
 			}
-
-			noncePadded := common.LeftPadBytes(nonce.Bytes(), 32)
-			challengePadded := common.LeftPadBytes(challenge.Bytes(), 32)
-			addressBytes := fromAddress.Bytes()
-			data := append(challengePadded, append(addressBytes, noncePadded...)...)
-			hash := crypto.Keccak256Hash(data)
-			if hash.Big().Cmp(target) == -1 {
-				resultChan <- nonce
-				return
+			for i := 0; i < int(cycle_times); i++ {
+				nonce.Add(nonce, big.NewInt(1))
+				noncePadded := common.LeftPadBytes(nonce.Bytes(), 32)
+				challengePadded := common.LeftPadBytes(challenge.Bytes(), 32)
+				addressBytes := fromAddress.Bytes()
+				data := append(challengePadded, append(addressBytes, noncePadded...)...)
+				hash := crypto.Keccak256Hash(data)
+				if hash.Big().Cmp(target) == -1 {
+					resultChan <- nonce
+					return
+				}
 			}
-			hashCountChan <- 1
-
+			// atomic.AddInt32(&totalHashCount, 10000)
+			hashCountChan <- int32(cycle_times)
 		}
 	}
 }
@@ -144,8 +157,8 @@ func main() {
 
 	logger.Info(color.YellowString("Mining workers started..."))
 
-	hashCountChan := make(chan int)
-	totalHashCount := 0
+	hashCountChan := make(chan int32, 20000000)
+	// totalHashCount := 0
 	ticker := time.NewTicker(1 * time.Second)
 
 	go func() {
@@ -161,7 +174,13 @@ func main() {
 			}
 		}
 	}()
-
+	// for i := 0; i < 6; i++ {
+	// 	go func() {
+	// 		for {
+	// 			;
+	// 		}
+	// 	}()
+	// }
 	var wg sync.WaitGroup
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
